@@ -2,31 +2,102 @@
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import { chatbotApi } from '@/lib/api-client';
 
 export default function Chatbot() {
   const [isLoading, setIsLoading] = useState(true);
-  const [chatbotId, setChatbotId] = useState('');
+  const [user, setUser] = useState<any>(null);
+  const [chatbotId, setChatbotId] = useState<string | null>(null);
+  const [chatbotName, setChatbotName] = useState<string>('');
+  const [systemPrompt, setSystemPrompt] = useState<string>('');
+  const [isSaving, setIsSaving] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
   const [widgetPreview, setWidgetPreview] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // In a real app, we'd fetch the user's chatbot info from Supabase here
     const fetchChatbotInfo = async () => {
-      // Mock data
-      setChatbotId('vocata-chatbot-12345');
-      setIsLoading(false);
+      try {
+        // Check if we have a session
+        const { data: sessionData } = await supabase.auth.getSession();
+        
+        if (!sessionData.session) {
+          setError("No active session");
+          setIsLoading(false);
+          return;
+        }
+        
+        // Get user data if session exists
+        const { data } = await supabase.auth.getUser();
+        if (data?.user) {
+          setUser(data.user);
+          
+          // Check if user has a chatbot assigned in metadata
+          const chatbotIdFromMetadata = data.user?.user_metadata?.chatbotId;
+          if (chatbotIdFromMetadata) {
+            setChatbotId(chatbotIdFromMetadata);
+            
+            try {
+              // Fetch chatbot info
+              const chatbot = await chatbotApi.getChatbot(chatbotIdFromMetadata);
+              setChatbotName(chatbot.name);
+              
+              // Fetch system prompt
+              const promptData = await chatbotApi.getSystemPrompt(chatbotIdFromMetadata);
+              setSystemPrompt(promptData.system_prompt || '');
+            } catch (apiError: any) {
+              console.error('API error:', apiError);
+              // If API is unavailable, use mock data
+              setChatbotName('Demo Chatbot');
+              setSystemPrompt('You are a helpful customer support agent for our company. Be friendly, concise, and accurate. If you don\'t know the answer to a question, acknowledge that and offer to connect the user with a human agent.');
+            }
+          } else {
+            setError("No chatbot assigned to this user");
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching session or user:', err);
+        setError("Error loading user data");
+      } finally {
+        setIsLoading(false);
+      }
     };
     
     fetchChatbotInfo();
   }, []);
 
-  const embedCode = `<script>
+  const handlePromptChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setSystemPrompt(e.target.value);
+  };
+
+  const handleSavePrompt = async () => {
+    if (!chatbotId) return;
+    
+    setIsSaving(true);
+    setSaveSuccess(false);
+    
+    try {
+      await chatbotApi.updateSystemPrompt(chatbotId, systemPrompt);
+      setSaveSuccess(true);
+      
+      // Hide success message after 3 seconds
+      setTimeout(() => setSaveSuccess(false), 3000);
+    } catch (err: any) {
+      console.error('Error saving system prompt:', err);
+      setError(err.message || 'Failed to save system prompt');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const embedCode = chatbotId ? `<script>
   window.vocataConfig = {
     chatbotId: "${chatbotId}",
     position: "right", // or "left"
   };
 </script>
-<script src="https://cdn.vocata.ai/widget.js" async></script>`;
+<script src="https://cdn.vocata.ai/widget.js" async></script>` : '';
 
   const copyEmbedCode = () => {
     navigator.clipboard.writeText(embedCode);
@@ -51,15 +122,84 @@ export default function Chatbot() {
     );
   }
 
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <div className="bg-red-100 p-4 rounded-md text-red-700">
+            <p>{error}</p>
+            <button 
+              className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-md"
+              onClick={() => window.location.href = '/login'}
+            >
+              Return to Login
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Chatbot Integration</h1>
-        <p className="text-gray-500">Add your chatbot to your website</p>
+        <h1 className="text-2xl font-bold text-gray-900">Chatbot Configuration</h1>
+        <p className="text-gray-500">Manage your chatbot's behavior and integration</p>
+        {chatbotName && (
+          <p className="text-gray-700 mt-1">Current chatbot: <span className="font-medium">{chatbotName}</span></p>
+        )}
       </div>
 
+      {/* System Prompt Section */}
+      <div className="bg-white shadow rounded-lg p-6 mb-6">
+        <h2 className="text-lg font-medium text-gray-900 mb-2">System Prompt</h2>
+        <p className="text-gray-600 mb-4">
+          Define how your chatbot responds and behaves by customizing its system prompt.
+        </p>
+        
+        {saveSuccess && (
+          <div className="bg-green-50 border-l-4 border-green-400 p-4 mb-4">
+            <div className="flex">
+              <div className="ml-3">
+                <p className="text-sm text-green-700">System prompt saved successfully!</p>
+              </div>
+            </div>
+          </div>
+        )}
+        
+        <div className="mb-4">
+          <textarea
+            value={systemPrompt}
+            onChange={handlePromptChange}
+            className="w-full h-48 p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            placeholder="Enter your system prompt here..."
+          ></textarea>
+        </div>
+        
+        <div className="flex justify-between items-center">
+          <a 
+            href="/dashboard/chatbot/test" 
+            className="text-indigo-600 hover:text-indigo-800 flex items-center"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-1.5 0a6.5 6.5 0 11-13 0 6.5 6.5 0 0113 0z" clipRule="evenodd" />
+              <path d="M10 7a1 1 0 011 1v2a1 1 0 01-1 1H9a1 1 0 010-2h.5V8a1 1 0 01.5-1z" />
+            </svg>
+            Test your chatbot
+          </a>
+          
+          <button
+            onClick={handleSavePrompt}
+            disabled={isSaving}
+            className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none"
+          >
+            {isSaving ? 'Saving...' : 'Save System Prompt'}
+          </button>
+        </div>
+      </div>
+
+      {/* Embed Code Section */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Embed Code Section */}
         <div className="bg-white shadow rounded-lg p-6">
           <h2 className="text-lg font-medium text-gray-900 mb-4">Embed Code</h2>
           <p className="text-gray-600 mb-4">
@@ -144,7 +284,7 @@ export default function Chatbot() {
             <div>
               <h3 className="text-md font-medium text-gray-900">3. Customize the widget</h3>
               <p className="text-gray-600">
-                You can customize the widget by changing the <code className="bg-gray-50 px-1 rounded">position</code> value in the embed code.
+                You can customize the widget appearance in the <a href="/dashboard/settings" className="text-indigo-600 hover:text-indigo-800">Settings</a> page.
               </p>
             </div>
             

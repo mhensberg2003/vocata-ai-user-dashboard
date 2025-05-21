@@ -11,8 +11,9 @@ import {
   Legend,
 } from 'chart.js';
 import { Bar } from 'react-chartjs-2';
-import { ChatbotStats } from '@/types';
 import { supabase } from '@/lib/supabase';
+import { ChatbotStats } from '@/types';
+import { chatbotApi, statsApi } from '@/lib/api-client';
 
 // Register Chart.js components
 ChartJS.register(
@@ -24,32 +25,11 @@ ChartJS.register(
   Legend
 );
 
-// Mock data - in a real app this would come from your Supabase database
-const mockStats: ChatbotStats = {
-  totalConversations: 1248,
-  totalMessages: 8963,
-  avgResponseTime: 1.2,
-  dailyUsage: [
-    { date: 'Mon', count: 120 },
-    { date: 'Tue', count: 145 },
-    { date: 'Wed', count: 132 },
-    { date: 'Thu', count: 187 },
-    { date: 'Fri', count: 166 },
-    { date: 'Sat', count: 91 },
-    { date: 'Sun', count: 78 },
-  ],
-  topQuestions: [
-    { question: 'How do I reset my password?', count: 45 },
-    { question: 'What are your business hours?', count: 38 },
-    { question: 'Do you offer refunds?', count: 32 },
-    { question: 'How can I contact support?', count: 29 },
-    { question: 'What payment methods do you accept?', count: 25 },
-  ],
-};
-
 export default function Dashboard() {
   const [user, setUser] = useState<any>(null);
-  const [stats, setStats] = useState<ChatbotStats>(mockStats);
+  const [chatbotId, setChatbotId] = useState<string | null>(null);
+  const [chatbotName, setChatbotName] = useState<string>('');
+  const [stats, setStats] = useState<ChatbotStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -69,7 +49,48 @@ export default function Dashboard() {
         const { data } = await supabase.auth.getUser();
         if (data?.user) {
           setUser(data.user);
-          console.log("User data:", data.user);
+          
+          // Check if user has a chatbot assigned in metadata
+          const chatbotIdFromMetadata = data.user?.user_metadata?.chatbotId;
+          if (chatbotIdFromMetadata) {
+            setChatbotId(chatbotIdFromMetadata);
+            
+            // Fetch chatbot info
+            try {
+              const chatbot = await chatbotApi.getChatbot(chatbotIdFromMetadata);
+              setChatbotName(chatbot.name);
+              
+              // Fetch chatbot stats
+              const chatbotStats = await statsApi.getChatbotStats(chatbotIdFromMetadata);
+              setStats(chatbotStats);
+            } catch (apiError: any) {
+              console.error('API error:', apiError);
+              // If API is unavailable, use mock data
+              setStats({
+                totalConversations: 1248,
+                totalMessages: 8963,
+                avgResponseTime: 1.2,
+                dailyUsage: [
+                  { date: 'Mon', count: 120 },
+                  { date: 'Tue', count: 145 },
+                  { date: 'Wed', count: 132 },
+                  { date: 'Thu', count: 187 },
+                  { date: 'Fri', count: 166 },
+                  { date: 'Sat', count: 91 },
+                  { date: 'Sun', count: 78 },
+                ],
+                topQuestions: [
+                  { question: 'How do I reset my password?', count: 45 },
+                  { question: 'What are your business hours?', count: 38 },
+                  { question: 'Do you offer refunds?', count: 32 },
+                  { question: 'How can I contact support?', count: 29 },
+                  { question: 'What payment methods do you accept?', count: 25 },
+                ],
+              });
+            }
+          } else {
+            setError("No chatbot assigned to this user");
+          }
         }
       } catch (err) {
         console.error('Error fetching session or user:', err);
@@ -81,33 +102,6 @@ export default function Dashboard() {
 
     checkSession();
   }, []);
-
-  // Chart data config
-  const chartData = {
-    labels: stats.dailyUsage.map(day => day.date),
-    datasets: [
-      {
-        label: 'Daily Conversations',
-        data: stats.dailyUsage.map(day => day.count),
-        backgroundColor: 'rgba(99, 102, 241, 0.5)',
-        borderColor: 'rgb(99, 102, 241)',
-        borderWidth: 1,
-      },
-    ],
-  };
-
-  const chartOptions = {
-    responsive: true,
-    plugins: {
-      legend: {
-        position: 'top' as const,
-      },
-      title: {
-        display: true,
-        text: 'Daily Conversations',
-      },
-    },
-  };
 
   if (isLoading) {
     return (
@@ -140,11 +134,53 @@ export default function Dashboard() {
     );
   }
 
+  if (!stats) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <div className="bg-yellow-100 p-4 rounded-md text-yellow-700">
+            <p>No stats available for your chatbot</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Chart data config
+  const chartData = {
+    labels: stats.dailyUsage.map(day => day.date),
+    datasets: [
+      {
+        label: 'Daily Conversations',
+        data: stats.dailyUsage.map(day => day.count),
+        backgroundColor: 'rgba(99, 102, 241, 0.5)',
+        borderColor: 'rgb(99, 102, 241)',
+        borderWidth: 1,
+      },
+    ],
+  };
+
+  const chartOptions = {
+    responsive: true,
+    plugins: {
+      legend: {
+        position: 'top' as const,
+      },
+      title: {
+        display: true,
+        text: 'Daily Conversations',
+      },
+    },
+  };
+
   return (
     <div>
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
         <p className="text-gray-500">Welcome back{user?.user_metadata?.company ? `, ${user.user_metadata.company}` : ''}!</p>
+        {chatbotName && (
+          <p className="text-gray-700 mt-1">Managing chatbot: <span className="font-medium">{chatbotName}</span></p>
+        )}
       </div>
 
       {/* Stats grid */}

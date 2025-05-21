@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { signOut } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
-import { ChevronDown, BarChart2, Settings, MessageSquare, LogOut, Menu, X } from 'lucide-react';
+import { BarChart2, Settings, MessageSquare, LogOut, Menu, X, Database } from 'lucide-react';
 
 export default function DashboardLayout({
   children,
@@ -26,6 +26,7 @@ export default function DashboardLayout({
   const navigation = [
     { name: 'Overview', href: '/dashboard', icon: BarChart2 },
     { name: 'Chatbot', href: '/dashboard/chatbot', icon: MessageSquare },
+    { name: 'Knowledge', href: '/dashboard/knowledge', icon: Database },
     { name: 'Settings', href: '/dashboard/settings', icon: Settings },
   ];
 
